@@ -1,0 +1,365 @@
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code 128B Generator & Text-Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        #barcode-container { min-height: 150px; display: flex; justify-content: center; align-items: center; padding: 1rem; border: 1px dashed #cbd5e1; border-radius: 0.375rem; margin-top: 1.5rem; }
+        #barcode { max-width: 100%; height: auto; }
+        /* Stile für das Kamera-Modal */
+        #camera-modal { display: none; position: fixed; z-index: 50; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.7); }
+        #camera-modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 600px; border-radius: 0.5rem; position: relative; }
+        #video-element { width: 100%; max-height: 400px; display: block; margin-bottom: 1rem; background-color: #333; border-radius: 0.375rem; }
+        .close-btn { position: absolute; top: 10px; right: 20px; color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-btn:hover, .close-btn:focus { color: black; text-decoration: none; cursor: pointer; }
+        /* Ladeanzeige */
+        #ocr-status { font-style: italic; color: #555; text-align: center; margin-top: 10px; min-height: 1.5em; word-wrap: break-word; }
+        /* Versteckte Canvas zum Zeichnen des Snapshots */
+        #snapshot-canvas { display: none; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100 flex flex-col items-center min-h-screen p-4">
+
+    <div class="bg-white p-6 md:p-8 rounded-lg shadow-md w-full max-w-xl">
+        <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-800 mb-6">
+            Code 128B Generator & Text-Scanner
+        </h1>
+
+        <div class="flex flex-col sm:flex-row items-stretch gap-2 mb-4">
+            <label for="barcode-data" class="sr-only">Daten eingeben:</label>
+            <input type="text" id="barcode-data" placeholder="Text für Barcode oder gescannten Text..."
+                   class="flex-grow p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150 ease-in-out">
+            <button id="scan-btn" title="Text mit Kamera scannen"
+                    class="bg-green-600 hover:bg-green-700 text-white font-semibold p-3 rounded-md shadow focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition duration-150 ease-in-out flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+                </svg>
+            </button>
+            <button id="generate-btn"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-5 rounded-md shadow focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-150 ease-in-out">
+                Barcode generieren
+            </button>
+        </div>
+
+        <div id="barcode-container">
+            <svg id="barcode"></svg>
+        </div>
+
+        <div id="error-message" class="text-red-600 text-sm text-center mt-4 h-5"></div>
+    </div>
+
+    <div id="camera-modal">
+        <div id="camera-modal-content">
+            <span class="close-btn" id="close-modal-btn">&times;</span>
+            <h2 class="text-xl font-semibold mb-4 text-center">Text scannen</h2>
+            <video id="video-element" playsinline autoplay></video>
+            <button id="capture-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-150 ease-in-out">
+                Text erfassen & erkennen
+            </button>
+            <div id="ocr-status">Kamera wird gestartet...</div>
+            <canvas id="snapshot-canvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+
+            // DOM Elements
+            const generateBtn = document.getElementById('generate-btn');
+            const dataInput = document.getElementById('barcode-data');
+            const barcodeElement = document.getElementById('barcode');
+            const errorMessageElement = document.getElementById('error-message');
+            const barcodeContainer = document.getElementById('barcode-container');
+            const scanBtn = document.getElementById('scan-btn');
+            const cameraModal = document.getElementById('camera-modal');
+            const closeModalBtn = document.getElementById('close-modal-btn');
+            const videoElement = document.getElementById('video-element');
+            const captureBtn = document.getElementById('capture-btn');
+            const ocrStatusElement = document.getElementById('ocr-status');
+            const snapshotCanvas = document.getElementById('snapshot-canvas');
+            const ctx = snapshotCanvas.getContext('2d');
+
+            let stream = null;
+            let tesseractWorker = null;
+
+            // --- Barcode Generation ---
+            function generateBarcode() {
+                const inputText = dataInput.value.trim();
+                errorMessageElement.textContent = '';
+                barcodeElement.innerHTML = '';
+                barcodeContainer.style.borderColor = '#cbd5e1';
+
+                if (!inputText) {
+                    errorMessageElement.textContent = 'Bitte geben Sie Daten für den Barcode ein.';
+                    barcodeContainer.style.borderColor = '#ef4444';
+                    return;
+                }
+
+                if (typeof JsBarcode === 'function') {
+                    try {
+                        JsBarcode(barcodeElement, inputText, {
+                            format: "CODE128B",
+                            lineColor: "#000000",
+                            width: 2,
+                            height: 80,
+                            displayValue: true,
+                            fontOptions: "bold",
+                            fontSize: 16,
+                            margin: 10
+                        });
+                        barcodeContainer.style.borderColor = '#22c55e';
+                    } catch (e) {
+                        console.error("JsBarcode Fehler:", e);
+                        errorMessageElement.textContent = 'Fehler: Eingabe konnte nicht als Code 128B kodiert werden.';
+                        barcodeContainer.style.borderColor = '#ef4444';
+                        barcodeElement.innerHTML = '';
+                    }
+                } else {
+                    console.error("JsBarcode library is not loaded yet.");
+                    errorMessageElement.textContent = 'Fehler: Barcode-Bibliothek konnte nicht geladen werden.';
+                    barcodeContainer.style.borderColor = '#ef4444';
+                }
+            }
+
+            // --- Camera & OCR Functionality ---
+
+            async function initializeTesseract() {
+                if (typeof Tesseract === 'undefined') {
+                    showError("Texterkennungs-Bibliothek (Tesseract.js) konnte nicht geladen werden.");
+                    return false;
+                }
+
+                if (!tesseractWorker) {
+                    ocrStatusElement.textContent = 'Lade Texterkennungs-Engine...';
+                    try {
+                        tesseractWorker = await Tesseract.createWorker('eng+deu', 1, {
+                           // logger: m => console.log(m), // Log progress
+                        });
+                        // No whitelist for general text recognition
+                        console.log("Tesseract Worker initialisiert für allgemeine Texterkennung.");
+                        ocrStatusElement.textContent = 'Kamera bereit. Text erfassen.';
+                        return true;
+                    } catch (error) {
+                        console.error("Tesseract Initialization Error:", error);
+                        showError(`Fehler beim Initialisieren der Texterkennung: ${error.message || error}`);
+                        return false;
+                    }
+                }
+                ocrStatusElement.textContent = 'Kamera bereit. Text erfassen.';
+                return true;
+            }
+
+            async function startCamera() {
+                ocrStatusElement.textContent = 'Frage Kamerazugriff an...';
+                ocrStatusElement.style.color = '#555'; // Reset color
+                try {
+                    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+
+                        // Attempt to request continuous autofocus
+                        const constraints = {
+                            video: {
+                                facingMode: 'environment',
+                                advanced: [{ focusMode: 'continuous' }]
+                            }
+                        };
+
+                        // Check if focusMode constraint is supported, fallback if not
+                        const supportedConstraints = navigator.mediaDevices.getSupportedConstraints();
+                        if (!supportedConstraints.focusMode) {
+                             console.warn("FocusMode Constraint wird vom Browser nicht explizit unterstützt, verwende Standard-Video.");
+                             constraints.video = { facingMode: 'environment' }; // Fallback
+                        }
+
+                        stream = await navigator.mediaDevices.getUserMedia(constraints);
+                        console.log("Kamera-Stream erhalten mit Constraints:", JSON.stringify(constraints));
+
+                        videoElement.srcObject = stream;
+                        videoElement.onloadedmetadata = async () => {
+                            try {
+                                await videoElement.play();
+                                cameraModal.style.display = 'block';
+
+                                // Check actual track settings for focus mode after play starts
+                                const videoTracks = stream.getVideoTracks();
+                                if (videoTracks.length > 0) {
+                                    const settings = videoTracks[0].getSettings();
+                                    console.log("Aktive Video Track Settings:", settings);
+                                    if (settings.focusMode) {
+                                        console.log(`Fokusmodus ist aktiv: ${settings.focusMode}`);
+                                        // Optionally update UI or status if needed
+                                    } else {
+                                        console.warn("Fokusmodus konnte nicht in den aktiven Einstellungen gefunden werden.");
+                                    }
+                                }
+
+                                const tesseractReady = await initializeTesseract();
+                                if (!tesseractReady) {
+                                    stopCamera();
+                                }
+                            } catch (playError) {
+                                console.error("Video play error:", playError);
+                                showError(`Fehler beim Starten des Videos: ${playError.name} - ${playError.message}`);
+                                stopCamera();
+                            }
+                        };
+                        videoElement.onerror = (e) => {
+                             console.error("Video Element Error:", e);
+                             showError("Fehler beim Laden des Video-Elements.");
+                             stopCamera();
+                        };
+
+                    } else {
+                        showError("getUserMedia wird von diesem Browser nicht unterstützt.");
+                        stopCamera();
+                    }
+                } catch (err) {
+                    console.error("Fehler beim Kamerazugriff (getUserMedia):", err);
+                    let detailedErrorMessage = `Kamerazugriff fehlgeschlagen: ${err.name || 'Unbekannter Fehler'}`;
+                    if (err.message) {
+                        detailedErrorMessage += ` - ${err.message}`;
+                    }
+                    if (err.name === 'OverconstrainedError') {
+                         detailedErrorMessage += ". Möglicherweise werden die angeforderten Kameraeinstellungen (z.B. Fokus) nicht unterstützt.";
+                    } else if (err.name === 'NotAllowedError') {
+                         detailedErrorMessage += ". Bitte erteilen Sie die Kameraberechtigung.";
+                    } else {
+                        detailedErrorMessage += ". Stellen Sie sicher, dass die Seite über HTTPS geladen wird.";
+                    }
+                    showError(detailedErrorMessage);
+                    stopCamera();
+                }
+            }
+
+            function stopCamera() {
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                    stream = null;
+                }
+                videoElement.srcObject = null;
+                videoElement.onloadedmetadata = null;
+                videoElement.onerror = null;
+                videoElement.pause();
+
+                cameraModal.style.display = 'none';
+                ocrStatusElement.textContent = 'Kamera wird gestartet...';
+                ocrStatusElement.style.color = '#555';
+            }
+
+            async function captureAndRecognize() {
+                if (!stream || !videoElement.srcObject || videoElement.paused) {
+                    showError("Kamera ist nicht aktiv oder Stream nicht bereit.");
+                    return;
+                }
+                 if (!tesseractWorker) {
+                    showError("Texterkennung ist nicht bereit. Bitte warten oder neu laden.");
+                    const ready = await initializeTesseract();
+                    if (!ready) return;
+                }
+
+                ocrStatusElement.textContent = 'Erfasse Bild...';
+
+                if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
+                    showError("Videodimensionen nicht verfügbar. Bitte kurz warten.");
+                    return;
+                }
+
+                snapshotCanvas.width = videoElement.videoWidth;
+                snapshotCanvas.height = videoElement.videoHeight;
+                // Draw current video frame onto canvas
+                ctx.drawImage(videoElement, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+
+                // Get image data from canvas for Tesseract
+                const imageDataUrl = snapshotCanvas.toDataURL('image/png');
+
+                ocrStatusElement.textContent = 'Erkenne Text (dauert einen Moment)...';
+                captureBtn.disabled = true;
+
+                try {
+                    const { data: { text } } = await tesseractWorker.recognize(imageDataUrl);
+                    console.log("Erkannter Text (roh):", text);
+
+                    // Use the recognized text directly after trimming
+                    const recognizedText = text.trim();
+
+                    if (recognizedText) {
+                        dataInput.value = recognizedText; // Write result to input field
+                        ocrStatusElement.textContent = `Text erkannt: ${recognizedText.substring(0, 50)}${recognizedText.length > 50 ? '...' : ''}`; // Show preview
+                        stopCamera();
+                        // Attempt to generate barcode only if the text might be valid for Code128B
+                        // A simple check: Code 128B usually handles standard ASCII
+                        if (/^[\x00-\x7F]*$/.test(recognizedText)) {
+                            generateBarcode();
+                        } else {
+                             errorMessageElement.textContent = 'Erkannter Text enthält Zeichen, die für Code128B ungültig sind.';
+                             barcodeElement.innerHTML = ''; // Clear previous barcode
+                             barcodeContainer.style.borderColor = '#ef4444';
+                        }
+                    } else {
+                        ocrStatusElement.textContent = 'Kein Text im Bild gefunden. Bitte erneut versuchen.';
+                        // Keep modal open for retry
+                    }
+
+                } catch (error) {
+                    console.error("OCR Fehler:", error);
+                    showError(`Texterkennung fehlgeschlagen: ${error.message || error}`);
+                    // Keep modal open for retry
+                } finally {
+                    captureBtn.disabled = false; // Re-enable button
+                }
+            }
+
+            function showError(message) {
+                ocrStatusElement.textContent = message;
+                ocrStatusElement.style.color = 'red';
+                setTimeout(() => {
+                    if (cameraModal.style.display === 'block') {
+                        if (ocrStatusElement.style.color === 'red') {
+                             ocrStatusElement.textContent = 'Kamera bereit. Text erfassen.';
+                             ocrStatusElement.style.color = '#555';
+                        }
+                    }
+                }, 6000); // Increased delay
+            }
+
+            // --- Event Listeners ---
+            if (generateBtn) generateBtn.addEventListener('click', generateBarcode);
+            if (dataInput) dataInput.addEventListener('keypress', function(event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    generateBarcode();
+                }
+            });
+            if (scanBtn) scanBtn.addEventListener('click', startCamera);
+            if (closeModalBtn) closeModalBtn.addEventListener('click', stopCamera);
+            if (captureBtn) captureBtn.addEventListener('click', captureAndRecognize);
+
+            window.addEventListener('click', (event) => {
+                if (event.target == cameraModal) {
+                    stopCamera();
+                }
+            });
+
+            window.addEventListener('beforeunload', async () => {
+                stopCamera(); // Ensure camera is stopped
+                if (tesseractWorker) {
+                    await tesseractWorker.terminate();
+                    console.log("Tesseract Worker beendet.");
+                    tesseractWorker = null;
+                }
+            });
+
+        }); // End of DOMContentLoaded listener
+    </script>
+
+</body>
+</html>

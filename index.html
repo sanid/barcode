@@ -12,14 +12,97 @@
         body { font-family: 'Inter', sans-serif; }
         #barcode-container { min-height: 150px; display: flex; justify-content: center; align-items: center; padding: 1rem; border: 1px dashed #cbd5e1; border-radius: 0.375rem; margin-top: 1.5rem; }
         #barcode { max-width: 100%; height: auto; }
-        /* Stile für das Kamera-Modal */
-        #camera-modal { display: none; position: fixed; z-index: 50; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.7); }
-        #camera-modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 600px; border-radius: 0.5rem; position: relative; }
-        #video-element { width: 100%; max-height: 400px; display: block; margin-bottom: 1rem; background-color: #333; border-radius: 0.375rem; }
-        .close-btn { position: absolute; top: 10px; right: 20px; color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; }
-        .close-btn:hover, .close-btn:focus { color: black; text-decoration: none; cursor: pointer; }
-        /* Ladeanzeige */
-        #ocr-status { font-style: italic; color: #555; text-align: center; margin-top: 10px; min-height: 1.5em; word-wrap: break-word; }
+        /* Stile für das Kamera-Modal - Fullscreen & Overlay */
+        #camera-modal { display: none; position: fixed; z-index: 50; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
+        #camera-modal-content {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        #video-element {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+        .scan-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            max-width: 400px;
+            height: 150px;
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5); /* Dim outside */
+            z-index: 5;
+            border-radius: 12px;
+            pointer-events: none;
+        }
+        .scan-overlay::after {
+            content: "Code hier platzieren";
+            position: absolute;
+            top: -30px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            text-shadow: 1px 1px 2px black;
+        }
+        .close-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 40px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 20;
+            background: rgba(0,0,0,0.4);
+            width: 50px;
+            height: 50px;
+            line-height: 46px;
+            text-align: center;
+            border-radius: 50%;
+        }
+        .close-btn:hover { background: rgba(0,0,0,0.7); }
+
+        #ocr-status {
+            position: absolute;
+            bottom: 100px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 1.1rem;
+            z-index: 10;
+            text-shadow: 1px 1px 3px black;
+            padding: 0 1rem;
+        }
+        #capture-container {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            z-index: 10;
+        }
+        #capture-btn {
+            width: 90%;
+            max-width: 300px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
         /* Versteckte Canvas zum Zeichnen des Snapshots */
         #snapshot-canvas { display: none; }
     </style>
@@ -62,12 +145,14 @@
     <div id="camera-modal">
         <div id="camera-modal-content">
             <span class="close-btn" id="close-modal-btn">&times;</span>
-            <h2 class="text-xl font-semibold mb-4 text-center">Text scannen</h2>
             <video id="video-element" playsinline autoplay></video>
-            <button id="capture-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-150 ease-in-out">
-                Text erfassen & erkennen
-            </button>
+            <div class="scan-overlay"></div>
             <div id="ocr-status">Kamera wird gestartet...</div>
+            <div id="capture-container">
+                <button id="capture-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-150 ease-in-out">
+                    Code Scannen
+                </button>
+            </div>
             <canvas id="snapshot-canvas"></canvas>
         </div>
     </div>
@@ -178,10 +263,12 @@
                 try {
                     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
 
-                        // Attempt to request continuous autofocus
+                        // Attempt to request continuous autofocus and high resolution (4K)
                         const constraints = {
                             video: {
                                 facingMode: 'environment',
+                                width: { ideal: 3840 },
+                                height: { ideal: 2160 },
                                 advanced: [{ focusMode: 'continuous' }]
                             }
                         };
@@ -304,9 +391,9 @@
                     // Use the recognized text directly after trimming
                     const recognizedText = text.trim();
 
-                    // Search for pattern starting with R00
-                    // Regex looks for R00 followed by alphanumeric characters
-                    const match = recognizedText.match(/\bR00[a-zA-Z0-9]*\b/);
+                    // Search for pattern starting with R or 00
+                    // Regex looks for R or 00 followed by alphanumeric characters
+                    const match = recognizedText.match(/\b(R|00)[a-zA-Z0-9]*\b/);
 
                     if (match) {
                         const filteredText = match[0];

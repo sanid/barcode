@@ -26,6 +26,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="manifest" href="manifest.json">
 </head>
 <body class="bg-gray-100 flex flex-col items-center min-h-screen p-4">
 
@@ -72,6 +73,18 @@
     </div>
 
     <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(registration => {
+                        console.log('Service Worker registriert mit Scope:', registration.scope);
+                    })
+                    .catch(error => {
+                        console.error('Service Worker Registrierung fehlgeschlagen:', error);
+                    });
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', (event) => {
 
             // DOM Elements
@@ -291,21 +304,22 @@
                     // Use the recognized text directly after trimming
                     const recognizedText = text.trim();
 
-                    if (recognizedText) {
-                        dataInput.value = recognizedText; // Write result to input field
-                        ocrStatusElement.textContent = `Text erkannt: ${recognizedText.substring(0, 50)}${recognizedText.length > 50 ? '...' : ''}`; // Show preview
+                    // Search for pattern starting with R00
+                    // Regex looks for R00 followed by alphanumeric characters
+                    const match = recognizedText.match(/\bR00[a-zA-Z0-9]*\b/);
+
+                    if (match) {
+                        const filteredText = match[0];
+                        dataInput.value = filteredText; // Write result to input field
+                        ocrStatusElement.textContent = `Code erkannt: ${filteredText}`;
                         stopCamera();
-                        // Attempt to generate barcode only if the text might be valid for Code128B
-                        // A simple check: Code 128B usually handles standard ASCII
-                        if (/^[\x00-\x7F]*$/.test(recognizedText)) {
-                            generateBarcode();
-                        } else {
-                             errorMessageElement.textContent = 'Erkannter Text enthält Zeichen, die für Code128B ungültig sind.';
-                             barcodeElement.innerHTML = ''; // Clear previous barcode
-                             barcodeContainer.style.borderColor = '#ef4444';
-                        }
+                        generateBarcode();
                     } else {
-                        ocrStatusElement.textContent = 'Kein Text im Bild gefunden. Bitte erneut versuchen.';
+                        if (recognizedText) {
+                             ocrStatusElement.textContent = `Kein Code mit "R00..." gefunden. (Erkannt: ${recognizedText.substring(0, 20)}...)`;
+                        } else {
+                             ocrStatusElement.textContent = 'Kein Text im Bild gefunden. Bitte erneut versuchen.';
+                        }
                         // Keep modal open for retry
                     }
 

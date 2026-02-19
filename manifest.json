@@ -1,0 +1,15 @@
+{
+  "short_name": "Code128B",
+  "name": "Code 128B Scanner",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ],
+  "start_url": "./index.html",
+  "display": "standalone",
+  "theme_color": "#2563EB",
+  "background_color": "#FFFFFF"
+}
